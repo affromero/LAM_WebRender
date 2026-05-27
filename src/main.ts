@@ -106,27 +106,29 @@ function getExpressionData() {
   bs["eyeBlinkLeft"] = blinkValue;
   bs["eyeBlinkRight"] = blinkValue;
 
+  // --- Subtle resting "really?" expression ---
+  bs["browDownLeft"] = 0.12;
+  bs["browOuterUpRight"] = 0.15;
+  bs["eyeSquintLeft"] = 0.08;
+  bs["mouthPressLeft"] = 0.06;
+  bs["noseSneerLeft"] = 0.05;
+
   // --- Fly-on-face reaction (only when cursor is on the head) ---
   const targetFly = isOnHead ? 1 : 0;
   flyReaction += (targetFly - flyReaction) * 0.08;
 
   if (flyReaction > 0.05) {
     const f = flyReaction;
-    // Squint hard — like something is on your face
-    bs["eyeSquintLeft"] = f * 0.6;
-    bs["eyeSquintRight"] = f * 0.5;
-    // Nose wrinkle — the core disgust signal
-    bs["noseSneerLeft"] = f * 0.55;
-    bs["noseSneerRight"] = f * 0.45;
-    // Upper lip raise — instinctive recoil
+    bs["eyeSquintLeft"] = 0.08 + f * 0.55;
+    bs["eyeSquintRight"] = f * 0.45;
+    bs["noseSneerLeft"] = 0.05 + f * 0.5;
+    bs["noseSneerRight"] = f * 0.4;
     bs["mouthUpperUpLeft"] = f * 0.35;
-    bs["mouthUpperUpRight"] = f * 0.25;
-    // Mouth tightens asymmetrically
-    bs["mouthPressLeft"] = f * 0.3;
-    // Brows knit together
-    bs["browDownLeft"] = f * 0.4;
-    bs["browDownRight"] = f * 0.35;
-    bs["browInnerUp"] = f * 0.25;
+    bs["mouthUpperUpRight"] = f * 0.2;
+    bs["mouthPressLeft"] = 0.06 + f * 0.25;
+    bs["browDownLeft"] = 0.12 + f * 0.3;
+    bs["browDownRight"] = f * 0.3;
+    bs["browInnerUp"] = f * 0.2;
   }
 
   return bs;
