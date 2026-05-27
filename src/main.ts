@@ -10,6 +10,8 @@ let isOnPage = false;
 let flyReaction = 0;
 let blinkValue = 0;
 let nextBlinkTime = randomBlinkDelay();
+let rendererInstance: any = null;
+let splatRaycaster: any = null;
 let isOnHead = false;
 let hitCheckCounter = 0;
 
@@ -28,28 +30,25 @@ document.addEventListener('mouseleave', () => {
 });
 
 function checkMouseOnHead(): boolean {
-  const canvas = div.querySelector('canvas');
-  if (!canvas) return false;
+  if (!rendererInstance?.viewer) return false;
+  const viewer = rendererInstance.viewer;
+  const camera = viewer.camera;
+  const splatMesh = viewer.splatMesh;
+  if (!camera || !splatMesh) return false;
 
-  // Get the EXISTING WebGL context (don't request a new one)
-  const gl = (canvas as any).__gl
-    || (canvas as any).getContext('webgl2')
-    || (canvas as any).getContext('webgl');
-  if (!gl) return false;
+  if (!splatRaycaster) {
+    splatRaycaster = new (GaussianSplats3D as any).Raycaster();
+  }
 
-  const dpr = window.devicePixelRatio || 1;
-  const rect = canvas.getBoundingClientRect();
-  const x = Math.floor((mouseClientX - rect.left) * dpr);
-  const y = Math.floor((rect.height - (mouseClientY - rect.top)) * dpr);
+  splatRaycaster.setFromCameraAndScreenPosition(
+    camera,
+    { x: mouseClientX, y: mouseClientY },
+    { x: window.innerWidth, y: window.innerHeight }
+  );
 
-  if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return false;
-
-  const pixel = new Uint8Array(4);
-  gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
-
-  // Background is 0x0e0e14 = (14, 14, 20). Anything significantly different is a splat.
-  const diff = Math.abs(pixel[0] - 14) + Math.abs(pixel[1] - 14) + Math.abs(pixel[2] - 20);
-  return diff > 30;
+  const hits: any[] = [];
+  splatRaycaster.intersectSplatMesh(splatMesh, hits);
+  return hits.length > 0;
 }
 
 function getChatState() {
@@ -60,9 +59,8 @@ function getExpressionData() {
   const bs: Record<string, number> = {};
   const now = performance.now();
 
-  // Check hit every 3rd frame — we're inside the render loop so framebuffer is valid
   hitCheckCounter++;
-  if (hitCheckCounter % 3 === 0) {
+  if (hitCheckCounter % 4 === 0) {
     isOnHead = isOnPage && checkMouseOnHead();
   }
   if (!isOnPage) isOnHead = false;
@@ -127,7 +125,7 @@ function getExpressionData() {
 }
 
 async function init() {
-  await GaussianSplats3D.GaussianSplatRenderer.getInstance(
+  rendererInstance = await GaussianSplats3D.GaussianSplatRenderer.getInstance(
     div,
     assetPath,
     {
