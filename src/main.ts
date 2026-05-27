@@ -15,8 +15,8 @@ let nextBlinkTime = randomBlinkDelay();
 // The renderer's camera sits at y=1.8 looking forward, so the head renders
 // roughly centered horizontally and slightly above vertical center.
 const HEAD_CENTER_X = 0;
-const HEAD_CENTER_Y = 0.1;
-const HEAD_RADIUS = 0.22;
+const HEAD_CENTER_Y = -0.05;
+const HEAD_RADIUS = 0.15;
 
 function randomBlinkDelay(): number {
   return performance.now() + 2000 + Math.random() * 5000;
