@@ -29,15 +29,22 @@ document.addEventListener('mouseleave', () => {
   isOnPage = false;
 });
 
+let debugCounter = 0;
+
 function checkMouseOnHead(): boolean {
-  if (!rendererInstance?.viewer) return false;
+  if (!rendererInstance?.viewer) { if (debugCounter++ < 3) console.log("no viewer"); return false; }
   const viewer = rendererInstance.viewer;
   const camera = viewer.camera;
   const splatMesh = viewer.splatMesh;
-  if (!camera || !splatMesh) return false;
+  if (!camera) { if (debugCounter++ < 3) console.log("no camera"); return false; }
+  if (!splatMesh) { if (debugCounter++ < 3) console.log("no splatMesh"); return false; }
+
+  const splatTree = splatMesh.getSplatTree?.();
+  if (!splatTree) { if (debugCounter++ < 5) console.log("no splatTree"); return false; }
 
   if (!splatRaycaster) {
     splatRaycaster = new (GaussianSplats3D as any).Raycaster();
+    console.log("Raycaster created:", splatRaycaster);
   }
 
   splatRaycaster.setFromCameraAndScreenPosition(
@@ -48,6 +55,10 @@ function checkMouseOnHead(): boolean {
 
   const hits: any[] = [];
   splatRaycaster.intersectSplatMesh(splatMesh, hits);
+  if (debugCounter < 10 && hits.length > 0) {
+    console.log("HIT!", hits.length, "splats at", mouseClientX, mouseClientY);
+    debugCounter = 100;
+  }
   return hits.length > 0;
 }
 
@@ -60,8 +71,11 @@ function getExpressionData() {
   const now = performance.now();
 
   hitCheckCounter++;
-  if (hitCheckCounter % 4 === 0) {
-    isOnHead = isOnPage && checkMouseOnHead();
+  if (hitCheckCounter === 1) console.log("getExpressionData called, isOnPage:", isOnPage);
+  if (hitCheckCounter % 4 === 0 && isOnPage) {
+    const prev = isOnHead;
+    isOnHead = checkMouseOnHead();
+    if (isOnHead !== prev) console.log("isOnHead changed:", isOnHead);
   }
   if (!isOnPage) isOnHead = false;
 
@@ -125,6 +139,7 @@ function getExpressionData() {
 }
 
 async function init() {
+  console.log("init starting...");
   rendererInstance = await GaussianSplats3D.GaussianSplatRenderer.getInstance(
     div,
     assetPath,
@@ -137,4 +152,4 @@ async function init() {
   );
 }
 
-init();
+init().then(() => console.log("init complete, renderer:", !!rendererInstance)).catch(e => console.error("init failed:", e));
