@@ -16,7 +16,7 @@ function randomBlinkDelay(): number {
 
 document.addEventListener('mousemove', (e) => {
   mouseX = (e.clientX / window.innerWidth) * 2 - 1;
-  mouseY = (e.clientY / window.innerHeight) * 2 - 1;
+  mouseY = -((e.clientY / window.innerHeight) * 2 - 1);
   isOnPage = true;
 });
 
@@ -37,18 +37,16 @@ function getExpressionData() {
   const yaw = mouseX;
   const pitch = mouseY;
 
-  // Eyes follow mouse — flipped from camera space to face space
   bs["eyeLookInLeft"] = Math.max(0, -yaw);
   bs["eyeLookOutLeft"] = Math.max(0, yaw);
   bs["eyeLookInRight"] = Math.max(0, yaw);
   bs["eyeLookOutRight"] = Math.max(0, -yaw);
 
-  bs["eyeLookDownLeft"] = Math.max(0, -pitch) * 0.8;
-  bs["eyeLookDownRight"] = Math.max(0, -pitch) * 0.8;
   bs["eyeLookUpLeft"] = Math.max(0, pitch) * 0.8;
   bs["eyeLookUpRight"] = Math.max(0, pitch) * 0.8;
+  bs["eyeLookDownLeft"] = Math.max(0, -pitch) * 0.8;
+  bs["eyeLookDownRight"] = Math.max(0, -pitch) * 0.8;
 
-  // Random blink
   if (now > nextBlinkTime) {
     const blinkDuration = 150;
     const elapsed = now - nextBlinkTime;
@@ -62,14 +60,21 @@ function getExpressionData() {
   bs["eyeBlinkLeft"] = blinkValue;
   bs["eyeBlinkRight"] = blinkValue;
 
-  // Disgust when cursor is on the face center
-  const onFace = isOnPage && (mouseX * mouseX + mouseY * mouseY < 0.12);
+  const faceCenterX = 0;
+  const faceCenterY = 0.15;
+  const faceRadius = 0.18;
+  const dx = mouseX - faceCenterX;
+  const dy = mouseY - faceCenterY;
+  const distToFace = Math.sqrt(dx * dx + dy * dy);
+  const onFace = isOnPage && distToFace < faceRadius;
+
   if (onFace) {
-    bs["jawOpen"] = 0.25 + Math.abs(mouseY) * 0.15;
-    bs["mouthFunnel"] = 0.15;
-    bs["noseSneerLeft"] = 0.25;
-    bs["noseSneerRight"] = 0.25;
-    bs["browInnerUp"] = 0.35;
+    const intensity = 1 - distToFace / faceRadius;
+    bs["jawOpen"] = intensity * 0.3;
+    bs["mouthFunnel"] = intensity * 0.15;
+    bs["noseSneerLeft"] = intensity * 0.25;
+    bs["noseSneerRight"] = intensity * 0.25;
+    bs["browInnerUp"] = intensity * 0.4;
   }
 
   return bs;
