@@ -6,12 +6,12 @@ const assetPath = params.get('zip') || './andres.zip';
 
 let mouseX = 0;
 let mouseY = 0;
-let mousePixelX = 0;
-let mousePixelY = 0;
-let isOnPage = true;
+let isOnPage = false;
 let isOnHead = false;
+let flyReaction = 0;
 let blinkValue = 0;
 let nextBlinkTime = randomBlinkDelay();
+let glContext: WebGLRenderingContext | WebGL2RenderingContext | null = null;
 
 function randomBlinkDelay(): number {
   return performance.now() + 2000 + Math.random() * 5000;
@@ -20,8 +20,6 @@ function randomBlinkDelay(): number {
 document.addEventListener('mousemove', (e) => {
   mouseX = (e.clientX / window.innerWidth) * 2 - 1;
   mouseY = -((e.clientY / window.innerHeight) * 2 - 1);
-  mousePixelX = e.clientX * (window.devicePixelRatio || 1);
-  mousePixelY = (window.innerHeight - e.clientY) * (window.devicePixelRatio || 1);
   isOnPage = true;
 });
 
@@ -32,25 +30,37 @@ document.addEventListener('mouseleave', () => {
   mouseY = 0;
 });
 
-function checkMouseOnHead(): boolean {
+function getGLContext(): WebGLRenderingContext | WebGL2RenderingContext | null {
+  if (glContext) return glContext;
   const canvas = div.querySelector('canvas');
-  if (!canvas) return false;
-  const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+  if (!canvas) return null;
+  glContext = canvas.getContext('webgl2', { preserveDrawingBuffer: true })
+    || canvas.getContext('webgl', { preserveDrawingBuffer: true });
+  return glContext;
+}
+
+function checkMouseOnHead(e?: MouseEvent): boolean {
+  const gl = getGLContext();
   if (!gl) return false;
 
+  const dpr = window.devicePixelRatio || 1;
+  const x = (e ? e.clientX : (mouseX + 1) / 2 * window.innerWidth) * dpr;
+  const y = (e ? (window.innerHeight - e.clientY) : (mouseY + 1) / 2 * window.innerHeight) * dpr;
+
   const pixel = new Uint8Array(4);
-  gl.readPixels(
-    Math.floor(mousePixelX),
-    Math.floor(mousePixelY),
-    1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel
-  );
+  gl.readPixels(Math.floor(x), Math.floor(y), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
 
   const bgR = 14, bgG = 14, bgB = 20;
   const diff = Math.abs(pixel[0] - bgR) + Math.abs(pixel[1] - bgG) + Math.abs(pixel[2] - bgB);
-  return diff > 30;
+  return diff > 40;
 }
 
-let hitCheckFrame = 0;
+document.addEventListener('click', (e) => {
+  const hit = checkMouseOnHead(e);
+  console.log('click hit:', hit, 'at', e.clientX, e.clientY);
+});
+
+let hitCheckCounter = 0;
 
 function getChatState() {
   return "Idle";
@@ -60,11 +70,15 @@ function getExpressionData() {
   const bs: Record<string, number> = {};
   const now = performance.now();
 
-  hitCheckFrame++;
-  if (hitCheckFrame % 3 === 0 && isOnPage) {
+  hitCheckCounter++;
+  if (hitCheckCounter % 5 === 0 && isOnPage) {
     isOnHead = checkMouseOnHead();
   }
+  if (!isOnPage) {
+    isOnHead = false;
+  }
 
+  // --- Eyes follow mouse (always) ---
   const yaw = mouseX;
   const pitch = mouseY;
 
@@ -78,6 +92,7 @@ function getExpressionData() {
   bs["eyeLookDownLeft"] = Math.max(0, -pitch) * 0.8;
   bs["eyeLookDownRight"] = Math.max(0, -pitch) * 0.8;
 
+  // --- Blink (always) ---
   if (now > nextBlinkTime) {
     const blinkDuration = 150;
     const elapsed = now - nextBlinkTime;
@@ -91,19 +106,27 @@ function getExpressionData() {
   bs["eyeBlinkLeft"] = blinkValue;
   bs["eyeBlinkRight"] = blinkValue;
 
-  if (isOnHead) {
-    bs["browDownLeft"] = 0.5;
-    bs["browDownRight"] = 0.15;
-    bs["browOuterUpRight"] = 0.5;
-    bs["eyeSquintLeft"] = 0.4;
-    bs["eyeSquintRight"] = 0.25;
-    bs["noseSneerLeft"] = 0.45;
-    bs["noseSneerRight"] = 0.3;
-    bs["mouthLeft"] = 0.2;
-    bs["mouthShrugUpper"] = 0.15;
-    bs["mouthPressLeft"] = 0.3;
-    bs["mouthPressRight"] = 0.15;
-    bs["mouthUpperUpLeft"] = 0.25;
+  // --- Fly-on-face reaction (only when cursor is on the head) ---
+  const targetFly = isOnHead ? 1 : 0;
+  flyReaction += (targetFly - flyReaction) * 0.08;
+
+  if (flyReaction > 0.05) {
+    const f = flyReaction;
+    // Squint hard — like something is on your face
+    bs["eyeSquintLeft"] = f * 0.6;
+    bs["eyeSquintRight"] = f * 0.5;
+    // Nose wrinkle — the core disgust signal
+    bs["noseSneerLeft"] = f * 0.55;
+    bs["noseSneerRight"] = f * 0.45;
+    // Upper lip raise — instinctive recoil
+    bs["mouthUpperUpLeft"] = f * 0.35;
+    bs["mouthUpperUpRight"] = f * 0.25;
+    // Mouth tightens asymmetrically
+    bs["mouthPressLeft"] = f * 0.3;
+    // Brows knit together
+    bs["browDownLeft"] = f * 0.4;
+    bs["browDownRight"] = f * 0.35;
+    bs["browInnerUp"] = f * 0.25;
   }
 
   return bs;
