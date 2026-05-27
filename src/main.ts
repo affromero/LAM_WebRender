@@ -7,11 +7,16 @@ const assetPath = params.get('zip') || './andres.zip';
 let mouseNdcX = 0;
 let mouseNdcY = 0;
 let isOnPage = false;
-let isOnHead = false;
 let flyReaction = 0;
 let blinkValue = 0;
 let nextBlinkTime = randomBlinkDelay();
-let rendererInstance: any = null;
+
+// Head center in NDC — calibrated to where the head actually appears on screen.
+// The renderer's camera sits at y=1.8 looking forward, so the head renders
+// roughly centered horizontally and slightly above vertical center.
+const HEAD_CENTER_X = 0;
+const HEAD_CENTER_Y = 0.1;
+const HEAD_RADIUS = 0.22;
 
 function randomBlinkDelay(): number {
   return performance.now() + 2000 + Math.random() * 5000;
@@ -25,31 +30,15 @@ document.addEventListener('mousemove', (e) => {
 
 document.addEventListener('mouseleave', () => {
   isOnPage = false;
-  isOnHead = false;
   mouseNdcX = 0;
   mouseNdcY = 0;
 });
 
-function checkMouseOnHead(): boolean {
-  if (!rendererInstance?.viewer?.camera) return false;
-
-  const camera = rendererInstance.viewer.camera;
-  const headCenter = { x: 0, y: 0, z: 0 };
-
-  const cx = headCenter.x, cy = headCenter.y, cz = headCenter.z;
-  const mvp = camera.projectionMatrix.clone().multiply(camera.matrixWorldInverse);
-  const e = mvp.elements;
-  const w = e[3] * cx + e[7] * cy + e[11] * cz + e[15];
-  if (w <= 0) return false;
-  const screenX = (e[0] * cx + e[4] * cy + e[8] * cz + e[12]) / w;
-  const screenY = (e[1] * cx + e[5] * cy + e[9] * cz + e[13]) / w;
-
-  const dx = mouseNdcX - screenX;
-  const dy = mouseNdcY - screenY;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-
-  const headScreenRadius = 0.35;
-  return dist < headScreenRadius;
+function isMouseOnHead(): boolean {
+  if (!isOnPage) return false;
+  const dx = mouseNdcX - HEAD_CENTER_X;
+  const dy = mouseNdcY - HEAD_CENTER_Y;
+  return (dx * dx + dy * dy) < HEAD_RADIUS * HEAD_RADIUS;
 }
 
 function getChatState() {
@@ -59,33 +48,23 @@ function getChatState() {
 function getExpressionData() {
   const bs: Record<string, number> = {};
   const now = performance.now();
+  const onHead = isMouseOnHead();
 
-  if (isOnPage) {
-    isOnHead = checkMouseOnHead();
-  } else {
-    isOnHead = false;
-  }
+  // --- Eyes follow mouse ---
+  bs["eyeLookInLeft"] = Math.max(0, -mouseNdcX);
+  bs["eyeLookOutLeft"] = Math.max(0, mouseNdcX);
+  bs["eyeLookInRight"] = Math.max(0, mouseNdcX);
+  bs["eyeLookOutRight"] = Math.max(0, -mouseNdcX);
+  bs["eyeLookUpLeft"] = Math.max(0, mouseNdcY) * 0.8;
+  bs["eyeLookUpRight"] = Math.max(0, mouseNdcY) * 0.8;
+  bs["eyeLookDownLeft"] = Math.max(0, -mouseNdcY) * 0.8;
+  bs["eyeLookDownRight"] = Math.max(0, -mouseNdcY) * 0.8;
 
-  // --- Eyes follow mouse (always) ---
-  const yaw = mouseNdcX;
-  const pitch = mouseNdcY;
-
-  bs["eyeLookInLeft"] = Math.max(0, -yaw);
-  bs["eyeLookOutLeft"] = Math.max(0, yaw);
-  bs["eyeLookInRight"] = Math.max(0, yaw);
-  bs["eyeLookOutRight"] = Math.max(0, -yaw);
-
-  bs["eyeLookUpLeft"] = Math.max(0, pitch) * 0.8;
-  bs["eyeLookUpRight"] = Math.max(0, pitch) * 0.8;
-  bs["eyeLookDownLeft"] = Math.max(0, -pitch) * 0.8;
-  bs["eyeLookDownRight"] = Math.max(0, -pitch) * 0.8;
-
-  // --- Blink (always) ---
+  // --- Blink ---
   if (now > nextBlinkTime) {
-    const blinkDuration = 150;
     const elapsed = now - nextBlinkTime;
-    if (elapsed < blinkDuration) {
-      blinkValue = Math.sin((elapsed / blinkDuration) * Math.PI);
+    if (elapsed < 150) {
+      blinkValue = Math.sin((elapsed / 150) * Math.PI);
     } else {
       blinkValue = 0;
       nextBlinkTime = randomBlinkDelay();
@@ -101,9 +80,9 @@ function getExpressionData() {
   bs["mouthPressLeft"] = 0.06;
   bs["noseSneerLeft"] = 0.05;
 
-  // --- Fly-on-face reaction ---
-  const targetFly = isOnHead ? 1 : 0;
-  flyReaction += (targetFly - flyReaction) * 0.08;
+  // --- Fly-on-face: smooth in/out ---
+  const target = onHead ? 1 : 0;
+  flyReaction += (target - flyReaction) * 0.08;
 
   if (flyReaction > 0.05) {
     const f = flyReaction;
@@ -123,7 +102,7 @@ function getExpressionData() {
 }
 
 async function init() {
-  rendererInstance = await GaussianSplats3D.GaussianSplatRenderer.getInstance(
+  await GaussianSplats3D.GaussianSplatRenderer.getInstance(
     div,
     assetPath,
     {
