@@ -18,6 +18,8 @@ function randomBlinkDelay(): number {
 document.addEventListener('mousemove', (e) => {
   mouseNdcX = (e.clientX / window.innerWidth) * 2 - 1;
   mouseNdcY = -((e.clientY / window.innerHeight) * 2 - 1);
+  (window as any).__mouseX = e.clientX;
+  (window as any).__mouseY = e.clientY;
   isOnPage = true;
 });
 
@@ -27,16 +29,9 @@ document.addEventListener('mouseleave', () => {
   mouseNdcY = 0;
 });
 
-const FACE_CX = 0;
-const FACE_CY = -0.05;
-const FACE_RX = 0.18;
-const FACE_RY = 0.15;
-
 function isMouseOnFace(): boolean {
   if (!isOnPage) return false;
-  const dx = (mouseNdcX - FACE_CX) / FACE_RX;
-  const dy = (mouseNdcY - FACE_CY) / FACE_RY;
-  return dx * dx + dy * dy < 1;
+  return !!(window as any).__onSplat;
 }
 
 function getChatState() { return "Idle"; }
