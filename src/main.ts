@@ -6,7 +6,10 @@ const assetPath = params.get('zip') || './andres.zip';
 
 let mouseX = 0;
 let mouseY = 0;
+let mousePixelX = 0;
+let mousePixelY = 0;
 let isOnPage = true;
+let isOnHead = false;
 let blinkValue = 0;
 let nextBlinkTime = randomBlinkDelay();
 
@@ -17,14 +20,37 @@ function randomBlinkDelay(): number {
 document.addEventListener('mousemove', (e) => {
   mouseX = (e.clientX / window.innerWidth) * 2 - 1;
   mouseY = -((e.clientY / window.innerHeight) * 2 - 1);
+  mousePixelX = e.clientX * (window.devicePixelRatio || 1);
+  mousePixelY = (window.innerHeight - e.clientY) * (window.devicePixelRatio || 1);
   isOnPage = true;
 });
 
 document.addEventListener('mouseleave', () => {
   isOnPage = false;
+  isOnHead = false;
   mouseX = 0;
   mouseY = 0;
 });
+
+function checkMouseOnHead(): boolean {
+  const canvas = div.querySelector('canvas');
+  if (!canvas) return false;
+  const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+  if (!gl) return false;
+
+  const pixel = new Uint8Array(4);
+  gl.readPixels(
+    Math.floor(mousePixelX),
+    Math.floor(mousePixelY),
+    1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel
+  );
+
+  const bgR = 14, bgG = 14, bgB = 20;
+  const diff = Math.abs(pixel[0] - bgR) + Math.abs(pixel[1] - bgG) + Math.abs(pixel[2] - bgB);
+  return diff > 30;
+}
+
+let hitCheckFrame = 0;
 
 function getChatState() {
   return "Idle";
@@ -33,6 +59,11 @@ function getChatState() {
 function getExpressionData() {
   const bs: Record<string, number> = {};
   const now = performance.now();
+
+  hitCheckFrame++;
+  if (hitCheckFrame % 3 === 0 && isOnPage) {
+    isOnHead = checkMouseOnHead();
+  }
 
   const yaw = mouseX;
   const pitch = mouseY;
@@ -60,21 +91,19 @@ function getExpressionData() {
   bs["eyeBlinkLeft"] = blinkValue;
   bs["eyeBlinkRight"] = blinkValue;
 
-  const faceCenterX = 0;
-  const faceCenterY = 0.15;
-  const faceRadius = 0.18;
-  const dx = mouseX - faceCenterX;
-  const dy = mouseY - faceCenterY;
-  const distToFace = Math.sqrt(dx * dx + dy * dy);
-  const onFace = isOnPage && distToFace < faceRadius;
-
-  if (onFace) {
-    const intensity = 1 - distToFace / faceRadius;
-    bs["jawOpen"] = intensity * 0.3;
-    bs["mouthFunnel"] = intensity * 0.15;
-    bs["noseSneerLeft"] = intensity * 0.25;
-    bs["noseSneerRight"] = intensity * 0.25;
-    bs["browInnerUp"] = intensity * 0.4;
+  if (isOnHead) {
+    bs["browDownLeft"] = 0.5;
+    bs["browDownRight"] = 0.15;
+    bs["browOuterUpRight"] = 0.5;
+    bs["eyeSquintLeft"] = 0.4;
+    bs["eyeSquintRight"] = 0.25;
+    bs["noseSneerLeft"] = 0.45;
+    bs["noseSneerRight"] = 0.3;
+    bs["mouthLeft"] = 0.2;
+    bs["mouthShrugUpper"] = 0.15;
+    bs["mouthPressLeft"] = 0.3;
+    bs["mouthPressRight"] = 0.15;
+    bs["mouthUpperUpLeft"] = 0.25;
   }
 
   return bs;
