@@ -4,24 +4,27 @@ const div = document.getElementById('LAM_WebRender') as HTMLDivElement;
 const params = new URLSearchParams(window.location.search);
 const assetPath = params.get('zip') || './andres.zip';
 
-let mouseClientX = 0;
-let mouseClientY = 0;
+let mouseNdcX = 0;
+let mouseNdcY = 0;
 let isOnPage = false;
 let flyReaction = 0;
 let blinkValue = 0;
 let nextBlinkTime = randomBlinkDelay();
 let rendererInstance: any = null;
-let splatRaycaster: any = null;
 let isOnHead = false;
 let hitCheckCounter = 0;
+
+// Screen-space bounding box of the head, updated from splat projections
+let headBounds = { minX: -0.3, maxX: 0.3, minY: -0.4, maxY: 0.4 };
+let boundsCalibrated = false;
 
 function randomBlinkDelay(): number {
   return performance.now() + 2000 + Math.random() * 5000;
 }
 
 document.addEventListener('mousemove', (e) => {
-  mouseClientX = e.clientX;
-  mouseClientY = e.clientY;
+  mouseNdcX = (e.clientX / window.innerWidth) * 2 - 1;
+  mouseNdcY = -((e.clientY / window.innerHeight) * 2 - 1);
   isOnPage = true;
 });
 
@@ -29,37 +32,62 @@ document.addEventListener('mouseleave', () => {
   isOnPage = false;
 });
 
-let debugCounter = 0;
-
-function checkMouseOnHead(): boolean {
-  if (!rendererInstance?.viewer) { if (debugCounter++ < 3) console.log("no viewer"); return false; }
+function calibrateHeadBounds() {
+  if (boundsCalibrated || !rendererInstance?.viewer) return;
   const viewer = rendererInstance.viewer;
   const camera = viewer.camera;
   const splatMesh = viewer.splatMesh;
-  if (!camera) { if (debugCounter++ < 3) console.log("no camera"); return false; }
-  if (!splatMesh) { if (debugCounter++ < 3) console.log("no splatMesh"); return false; }
+  if (!camera || !splatMesh) return;
 
-  const splatTree = splatMesh.getSplatTree?.();
-  if (!splatTree) { if (debugCounter++ < 5) console.log("no splatTree"); return false; }
+  const count = splatMesh.getSplatCount?.();
+  if (!count || count === 0) return;
 
-  if (!splatRaycaster) {
-    splatRaycaster = new (GaussianSplats3D as any).Raycaster();
-    console.log("Raycaster created:", splatRaycaster);
+  const mvp = camera.projectionMatrix.clone().multiply(camera.matrixWorldInverse);
+  const e = mvp.elements;
+
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  let projected = 0;
+
+  // Sample every 20th splat to find bounding box in screen space
+  const step = Math.max(1, Math.floor(count / 500));
+  const center = { x: 0, y: 0, z: 0 };
+
+  for (let i = 0; i < count; i += step) {
+    try {
+      splatMesh.getSplatCenter(i, center);
+    } catch {
+      continue;
+    }
+    const cx = center.x, cy = center.y, cz = center.z;
+    const w = e[3] * cx + e[7] * cy + e[11] * cz + e[15];
+    if (w <= 0.001) continue;
+    const sx = (e[0] * cx + e[4] * cy + e[8] * cz + e[12]) / w;
+    const sy = (e[1] * cx + e[5] * cy + e[9] * cz + e[13]) / w;
+    if (sx < -2 || sx > 2 || sy < -2 || sy > 2) continue;
+
+    if (sx < minX) minX = sx;
+    if (sx > maxX) maxX = sx;
+    if (sy < minY) minY = sy;
+    if (sy > maxY) maxY = sy;
+    projected++;
   }
 
-  splatRaycaster.setFromCameraAndScreenPosition(
-    camera,
-    { x: mouseClientX, y: mouseClientY },
-    { x: window.innerWidth, y: window.innerHeight }
-  );
-
-  const hits: any[] = [];
-  splatRaycaster.intersectSplatMesh(splatMesh, hits);
-  if (debugCounter < 10 && hits.length > 0) {
-    console.log("HIT!", hits.length, "splats at", mouseClientX, mouseClientY);
-    debugCounter = 100;
+  if (projected > 10) {
+    // Shrink bounds to ~70% to exclude outlier splats (hair edges etc)
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const hw = (maxX - minX) / 2 * 0.6;
+    const hh = (maxY - minY) / 2 * 0.55;
+    headBounds = { minX: cx - hw, maxX: cx + hw, minY: cy - hh, maxY: cy + hh };
+    boundsCalibrated = true;
+    console.log("Head bounds calibrated:", headBounds, `(${projected} splats sampled)`);
   }
-  return hits.length > 0;
+}
+
+function checkMouseOnHead(): boolean {
+  if (!boundsCalibrated) return false;
+  return mouseNdcX >= headBounds.minX && mouseNdcX <= headBounds.maxX &&
+         mouseNdcY >= headBounds.minY && mouseNdcY <= headBounds.maxY;
 }
 
 function getChatState() {
@@ -71,16 +99,18 @@ function getExpressionData() {
   const now = performance.now();
 
   hitCheckCounter++;
-  if (hitCheckCounter === 1) console.log("getExpressionData called, isOnPage:", isOnPage);
-  if (hitCheckCounter % 4 === 0 && isOnPage) {
-    const prev = isOnHead;
-    isOnHead = checkMouseOnHead();
-    if (isOnHead !== prev) console.log("isOnHead changed:", isOnHead);
+  if (!boundsCalibrated && hitCheckCounter % 30 === 0) {
+    calibrateHeadBounds();
   }
-  if (!isOnPage) isOnHead = false;
 
-  const ndcX = (mouseClientX / window.innerWidth) * 2 - 1;
-  const ndcY = -((mouseClientY / window.innerHeight) * 2 - 1);
+  if (isOnPage) {
+    isOnHead = checkMouseOnHead();
+  } else {
+    isOnHead = false;
+  }
+
+  const ndcX = mouseNdcX;
+  const ndcY = mouseNdcY;
 
   // --- Eyes follow mouse ---
   bs["eyeLookInLeft"] = Math.max(0, -ndcX);
@@ -139,7 +169,6 @@ function getExpressionData() {
 }
 
 async function init() {
-  console.log("init starting...");
   rendererInstance = await GaussianSplats3D.GaussianSplatRenderer.getInstance(
     div,
     assetPath,
@@ -152,4 +181,4 @@ async function init() {
   );
 }
 
-init().then(() => console.log("init complete, renderer:", !!rendererInstance)).catch(e => console.error("init failed:", e));
+init();
