@@ -1,4 +1,5 @@
 import * as GaussianSplats3D from "gaussian-splat-renderer-for-lam"
+import * as THREE from "three"
 
 const div = document.getElementById('LAM_WebRender') as HTMLDivElement;
 const params = new URLSearchParams(window.location.search);
@@ -11,7 +12,8 @@ let flyReaction = 0;
 let blinkValue = 0;
 let nextBlinkTime = randomBlinkDelay();
 let rendererInstance: any = null;
-let splatRaycaster: any = null;
+const raycaster = new THREE.Raycaster();
+const mouseVec = new THREE.Vector2();
 
 function randomBlinkDelay(): number {
   return performance.now() + 2000 + Math.random() * 5000;
@@ -20,6 +22,8 @@ function randomBlinkDelay(): number {
 document.addEventListener('mousemove', (e) => {
   mouseScreenX = e.clientX;
   mouseScreenY = e.clientY;
+  mouseVec.x = (e.clientX / window.innerWidth) * 2 - 1;
+  mouseVec.y = -(e.clientY / window.innerHeight) * 2 + 1;
   isOnPage = true;
 });
 
@@ -32,23 +36,14 @@ let isOnHead = false;
 
 function checkMouseOnHead(): boolean {
   if (!rendererInstance?.viewer?.camera) return false;
-  if (!rendererInstance.viewer.splatMesh) return false;
-
-  if (!splatRaycaster) {
-    splatRaycaster = new GaussianSplats3D.Raycaster();
-  }
+  const splatMesh = rendererInstance.viewer.splatMesh;
+  if (!splatMesh) return false;
 
   const camera = rendererInstance.viewer.camera;
-  const splatMesh = rendererInstance.viewer.splatMesh;
+  raycaster.setFromCamera(mouseVec, camera);
 
-  splatRaycaster.setFromCameraAndScreenPosition(
-    camera,
-    { x: mouseScreenX, y: mouseScreenY },
-    { x: window.innerWidth, y: window.innerHeight }
-  );
-
-  const hits: any[] = [];
-  splatRaycaster.intersectSplatMesh(splatMesh, hits);
+  const hits: THREE.Intersection[] = [];
+  splatMesh.raycast(raycaster, hits);
   return hits.length > 0;
 }
 
@@ -59,8 +54,6 @@ function getChatState() {
 function getExpressionData() {
   const bs: Record<string, number> = {};
   const now = performance.now();
-  const mouseNdcX = (mouseScreenX / window.innerWidth) * 2 - 1;
-  const mouseNdcY = -((mouseScreenY / window.innerHeight) * 2 - 1);
 
   hitCheckCounter++;
   if (hitCheckCounter % 4 === 0) {
@@ -68,15 +61,18 @@ function getExpressionData() {
   }
   if (!isOnPage) isOnHead = false;
 
+  const ndcX = (mouseScreenX / window.innerWidth) * 2 - 1;
+  const ndcY = -((mouseScreenY / window.innerHeight) * 2 - 1);
+
   // --- Eyes follow mouse ---
-  bs["eyeLookInLeft"] = Math.max(0, -mouseNdcX);
-  bs["eyeLookOutLeft"] = Math.max(0, mouseNdcX);
-  bs["eyeLookInRight"] = Math.max(0, mouseNdcX);
-  bs["eyeLookOutRight"] = Math.max(0, -mouseNdcX);
-  bs["eyeLookUpLeft"] = Math.max(0, mouseNdcY) * 0.8;
-  bs["eyeLookUpRight"] = Math.max(0, mouseNdcY) * 0.8;
-  bs["eyeLookDownLeft"] = Math.max(0, -mouseNdcY) * 0.8;
-  bs["eyeLookDownRight"] = Math.max(0, -mouseNdcY) * 0.8;
+  bs["eyeLookInLeft"] = Math.max(0, -ndcX);
+  bs["eyeLookOutLeft"] = Math.max(0, ndcX);
+  bs["eyeLookInRight"] = Math.max(0, ndcX);
+  bs["eyeLookOutRight"] = Math.max(0, -ndcX);
+  bs["eyeLookUpLeft"] = Math.max(0, ndcY) * 0.8;
+  bs["eyeLookUpRight"] = Math.max(0, ndcY) * 0.8;
+  bs["eyeLookDownLeft"] = Math.max(0, -ndcY) * 0.8;
+  bs["eyeLookDownRight"] = Math.max(0, -ndcY) * 0.8;
 
   // --- Blink ---
   if (now > nextBlinkTime) {
@@ -98,32 +94,26 @@ function getExpressionData() {
   bs["mouthPressLeft"] = 0.06;
   bs["noseSneerLeft"] = 0.05;
 
-  // --- Fly-on-face: smooth transition, BIG reaction ---
+  // --- Fly-on-face: BIG reaction ---
   const target = isOnHead ? 1 : 0;
   flyReaction += (target - flyReaction) * 0.1;
 
   if (flyReaction > 0.05) {
     const f = flyReaction;
-    // Eyes go wide then squint — shock then disgust
     bs["eyeWideLeft"] = f * 0.5;
     bs["eyeWideRight"] = f * 0.4;
     bs["eyeSquintLeft"] = 0.08 + f * 0.3;
     bs["eyeSquintRight"] = f * 0.25;
-    // Nose wrinkle — hard
     bs["noseSneerLeft"] = 0.05 + f * 0.7;
     bs["noseSneerRight"] = f * 0.6;
-    // Upper lip raise — recoil
     bs["mouthUpperUpLeft"] = f * 0.5;
     bs["mouthUpperUpRight"] = f * 0.35;
-    // Mouth tightens
     bs["mouthPressLeft"] = 0.06 + f * 0.35;
     bs["mouthPressRight"] = f * 0.2;
-    // Brows — one down, one up
     bs["browDownLeft"] = 0.12 + f * 0.5;
     bs["browDownRight"] = f * 0.2;
     bs["browOuterUpRight"] = 0.15 + f * 0.45;
     bs["browInnerUp"] = f * 0.35;
-    // Cheek puff
     bs["cheekPuff"] = f * 0.2;
   }
 
