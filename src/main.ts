@@ -10,13 +10,6 @@ let isOnPage = false;
 let flyReaction = 0;
 let blinkValue = 0;
 let nextBlinkTime = randomBlinkDelay();
-let rendererInstance: any = null;
-let isOnHead = false;
-let hitCheckCounter = 0;
-
-// Screen-space bounding box of the head, updated from splat projections
-let headBounds = { minX: -0.3, maxX: 0.3, minY: -0.4, maxY: 0.4 };
-let boundsCalibrated = false;
 
 function randomBlinkDelay(): number {
   return performance.now() + 2000 + Math.random() * 5000;
@@ -30,64 +23,22 @@ document.addEventListener('mousemove', (e) => {
 
 document.addEventListener('mouseleave', () => {
   isOnPage = false;
+  mouseNdcX = 0;
+  mouseNdcY = 0;
 });
 
-function calibrateHeadBounds() {
-  if (boundsCalibrated || !rendererInstance?.viewer) return;
-  const viewer = rendererInstance.viewer;
-  const camera = viewer.camera;
-  const splatMesh = viewer.splatMesh;
-  if (!camera || !splatMesh) return;
+// Face zone: ellipse in NDC space
+// These values need tuning per model — for the demo andres.zip:
+const FACE_CX = 0;
+const FACE_CY = 0.05;
+const FACE_RX = 0.22;
+const FACE_RY = 0.18;
 
-  const count = splatMesh.getSplatCount?.();
-  if (!count || count === 0) return;
-
-  const mvp = camera.projectionMatrix.clone().multiply(camera.matrixWorldInverse);
-  const e = mvp.elements;
-
-  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-  let projected = 0;
-
-  // Sample every 20th splat to find bounding box in screen space
-  const step = Math.max(1, Math.floor(count / 500));
-  const center = { x: 0, y: 0, z: 0 };
-
-  for (let i = 0; i < count; i += step) {
-    try {
-      splatMesh.getSplatCenter(i, center);
-    } catch {
-      continue;
-    }
-    const cx = center.x, cy = center.y, cz = center.z;
-    const w = e[3] * cx + e[7] * cy + e[11] * cz + e[15];
-    if (w <= 0.001) continue;
-    const sx = (e[0] * cx + e[4] * cy + e[8] * cz + e[12]) / w;
-    const sy = (e[1] * cx + e[5] * cy + e[9] * cz + e[13]) / w;
-    if (sx < -2 || sx > 2 || sy < -2 || sy > 2) continue;
-
-    if (sx < minX) minX = sx;
-    if (sx > maxX) maxX = sx;
-    if (sy < minY) minY = sy;
-    if (sy > maxY) maxY = sy;
-    projected++;
-  }
-
-  if (projected > 10) {
-    // Shrink bounds to ~70% to exclude outlier splats (hair edges etc)
-    const cx = (minX + maxX) / 2;
-    const cy = (minY + maxY) / 2;
-    const hw = (maxX - minX) / 2 * 0.6;
-    const hh = (maxY - minY) / 2 * 0.55;
-    headBounds = { minX: cx - hw, maxX: cx + hw, minY: cy - hh, maxY: cy + hh };
-    boundsCalibrated = true;
-    console.log("Head bounds calibrated:", headBounds, `(${projected} splats sampled)`);
-  }
-}
-
-function checkMouseOnHead(): boolean {
-  if (!boundsCalibrated) return false;
-  return mouseNdcX >= headBounds.minX && mouseNdcX <= headBounds.maxX &&
-         mouseNdcY >= headBounds.minY && mouseNdcY <= headBounds.maxY;
+function isMouseOnFace(): boolean {
+  if (!isOnPage) return false;
+  const dx = (mouseNdcX - FACE_CX) / FACE_RX;
+  const dy = (mouseNdcY - FACE_CY) / FACE_RY;
+  return dx * dx + dy * dy < 1;
 }
 
 function getChatState() {
@@ -97,30 +48,17 @@ function getChatState() {
 function getExpressionData() {
   const bs: Record<string, number> = {};
   const now = performance.now();
-
-  hitCheckCounter++;
-  if (!boundsCalibrated && hitCheckCounter % 30 === 0) {
-    calibrateHeadBounds();
-  }
-
-  if (isOnPage) {
-    isOnHead = checkMouseOnHead();
-  } else {
-    isOnHead = false;
-  }
-
-  const ndcX = mouseNdcX;
-  const ndcY = mouseNdcY;
+  const onFace = isMouseOnFace();
 
   // --- Eyes follow mouse ---
-  bs["eyeLookInLeft"] = Math.max(0, -ndcX);
-  bs["eyeLookOutLeft"] = Math.max(0, ndcX);
-  bs["eyeLookInRight"] = Math.max(0, ndcX);
-  bs["eyeLookOutRight"] = Math.max(0, -ndcX);
-  bs["eyeLookUpLeft"] = Math.max(0, ndcY) * 0.8;
-  bs["eyeLookUpRight"] = Math.max(0, ndcY) * 0.8;
-  bs["eyeLookDownLeft"] = Math.max(0, -ndcY) * 0.8;
-  bs["eyeLookDownRight"] = Math.max(0, -ndcY) * 0.8;
+  bs["eyeLookInLeft"] = Math.max(0, -mouseNdcX);
+  bs["eyeLookOutLeft"] = Math.max(0, mouseNdcX);
+  bs["eyeLookInRight"] = Math.max(0, mouseNdcX);
+  bs["eyeLookOutRight"] = Math.max(0, -mouseNdcX);
+  bs["eyeLookUpLeft"] = Math.max(0, mouseNdcY) * 0.8;
+  bs["eyeLookUpRight"] = Math.max(0, mouseNdcY) * 0.8;
+  bs["eyeLookDownLeft"] = Math.max(0, -mouseNdcY) * 0.8;
+  bs["eyeLookDownRight"] = Math.max(0, -mouseNdcY) * 0.8;
 
   // --- Blink ---
   if (now > nextBlinkTime) {
@@ -142,8 +80,8 @@ function getExpressionData() {
   bs["mouthPressLeft"] = 0.06;
   bs["noseSneerLeft"] = 0.05;
 
-  // --- Fly-on-face: BIG reaction ---
-  const target = isOnHead ? 1 : 0;
+  // --- Fly-on-face ---
+  const target = onFace ? 1 : 0;
   flyReaction += (target - flyReaction) * 0.1;
 
   if (flyReaction > 0.05) {
@@ -169,7 +107,7 @@ function getExpressionData() {
 }
 
 async function init() {
-  rendererInstance = await GaussianSplats3D.GaussianSplatRenderer.getInstance(
+  await GaussianSplats3D.GaussianSplatRenderer.getInstance(
     div,
     assetPath,
     {
