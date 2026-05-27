@@ -1,29 +1,25 @@
 import * as GaussianSplats3D from "gaussian-splat-renderer-for-lam"
-import * as THREE from "three"
 
 const div = document.getElementById('LAM_WebRender') as HTMLDivElement;
 const params = new URLSearchParams(window.location.search);
 const assetPath = params.get('zip') || './andres.zip';
 
-let mouseScreenX = 0;
-let mouseScreenY = 0;
+let mouseClientX = 0;
+let mouseClientY = 0;
 let isOnPage = false;
 let flyReaction = 0;
 let blinkValue = 0;
 let nextBlinkTime = randomBlinkDelay();
-let rendererInstance: any = null;
-const raycaster = new THREE.Raycaster();
-const mouseVec = new THREE.Vector2();
+let isOnHead = false;
+let hitCheckCounter = 0;
 
 function randomBlinkDelay(): number {
   return performance.now() + 2000 + Math.random() * 5000;
 }
 
 document.addEventListener('mousemove', (e) => {
-  mouseScreenX = e.clientX;
-  mouseScreenY = e.clientY;
-  mouseVec.x = (e.clientX / window.innerWidth) * 2 - 1;
-  mouseVec.y = -(e.clientY / window.innerHeight) * 2 + 1;
+  mouseClientX = e.clientX;
+  mouseClientY = e.clientY;
   isOnPage = true;
 });
 
@@ -31,20 +27,29 @@ document.addEventListener('mouseleave', () => {
   isOnPage = false;
 });
 
-let hitCheckCounter = 0;
-let isOnHead = false;
-
 function checkMouseOnHead(): boolean {
-  if (!rendererInstance?.viewer?.camera) return false;
-  const splatMesh = rendererInstance.viewer.splatMesh;
-  if (!splatMesh) return false;
+  const canvas = div.querySelector('canvas');
+  if (!canvas) return false;
 
-  const camera = rendererInstance.viewer.camera;
-  raycaster.setFromCamera(mouseVec, camera);
+  // Get the EXISTING WebGL context (don't request a new one)
+  const gl = (canvas as any).__gl
+    || (canvas as any).getContext('webgl2')
+    || (canvas as any).getContext('webgl');
+  if (!gl) return false;
 
-  const hits: THREE.Intersection[] = [];
-  splatMesh.raycast(raycaster, hits);
-  return hits.length > 0;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  const x = Math.floor((mouseClientX - rect.left) * dpr);
+  const y = Math.floor((rect.height - (mouseClientY - rect.top)) * dpr);
+
+  if (x < 0 || y < 0 || x >= canvas.width || y >= canvas.height) return false;
+
+  const pixel = new Uint8Array(4);
+  gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, pixel);
+
+  // Background is 0x0e0e14 = (14, 14, 20). Anything significantly different is a splat.
+  const diff = Math.abs(pixel[0] - 14) + Math.abs(pixel[1] - 14) + Math.abs(pixel[2] - 20);
+  return diff > 30;
 }
 
 function getChatState() {
@@ -55,14 +60,15 @@ function getExpressionData() {
   const bs: Record<string, number> = {};
   const now = performance.now();
 
+  // Check hit every 3rd frame — we're inside the render loop so framebuffer is valid
   hitCheckCounter++;
-  if (hitCheckCounter % 4 === 0) {
+  if (hitCheckCounter % 3 === 0) {
     isOnHead = isOnPage && checkMouseOnHead();
   }
   if (!isOnPage) isOnHead = false;
 
-  const ndcX = (mouseScreenX / window.innerWidth) * 2 - 1;
-  const ndcY = -((mouseScreenY / window.innerHeight) * 2 - 1);
+  const ndcX = (mouseClientX / window.innerWidth) * 2 - 1;
+  const ndcY = -((mouseClientY / window.innerHeight) * 2 - 1);
 
   // --- Eyes follow mouse ---
   bs["eyeLookInLeft"] = Math.max(0, -ndcX);
@@ -121,7 +127,7 @@ function getExpressionData() {
 }
 
 async function init() {
-  rendererInstance = await GaussianSplats3D.GaussianSplatRenderer.getInstance(
+  await GaussianSplats3D.GaussianSplatRenderer.getInstance(
     div,
     assetPath,
     {
